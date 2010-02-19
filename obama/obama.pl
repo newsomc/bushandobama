@@ -1,7 +1,3 @@
-BEGIN { 
-    my $base_module_dir = (-d '/home/si601/perl' ? '/home/si601/perl' : ( getpwuid($>) )[7] . '/perl/'); 
-    unshift @INC, map { $base_module_dir . $_ } @INC; 
-}
 
 use URI;
 use LWP::UserAgent;
@@ -9,32 +5,50 @@ use HTTP::Cookies;
 use HTML::Strip;
 use HTML::Strip::Whitespace qw(html_strip_whitespace);
 use WWW::Mechanize;
+use Lingua::Stem;
 use Data::Dumper;
 
 
-#create output directories
+#create output directories, documents and database
 mkdir("obama_press", 0777) || print $!;
-mkdir("obama_debug", 0777) || print $!;
- 
-dbmopen(%wordCollector,'obama_countDB',0666);
- 
-open(OUTD, ">obama_debug/debug_report.txt")||die("could not open output debug file\n");
- 
+mkdir("obama_debug", 0777) || print $!; 
+dbmopen(%wordCollector,'obama_countDB',0666); 
+open(OUTD, ">obama_debug/debug_report.txt")||die("could not open output debug file\n"); 
 open(OUTF, ">obamna_term_freq_report.txt")||die("could not open output file\n");
 print OUTF "term\tcount\n";
 
-# intialize the HTML stripper
+# intialize HTML stripper object
 my $hs = HTML::Strip->new();
+
+#initalize Mechanize object
 my $mech = WWW::Mechanize->new();
-# initialize the User Agent that is going to fetch the page
+
+# initialize the User Agent 
 my $ua = LWP::UserAgent->new;
 $ua->agent("my bot 1.0");
 $ua->cookie_jar($self->{'cookies'});
-
-# give it a timeout so it doesn't hang for too long
 $ua->timeout(1000); 
 
-print "gather URLs\n";
+#initialize stemmer object
+my $stemmer = Lingua::Stem->new(-locale => 'EN-UK');
+$stemmer->stem_caching({ -level => 2 });
+
+#open the stopwords file and load the stop list into an array
+@stop_words = ();
+
+open(STOP, ">stop_words_stem.txt")||die("could not open stop words file\n");
+
+foreach $line (<STOP>) {
+    chomp($line);
+	push(@stop_words, $line);
+}
+
+#initialize counting variables
+$wordcount = 0;
+$doccount = 0;
+
+
+print "gathering data.\n";
 
 
 for($i = 0; $i <= 7; $i++){
@@ -49,6 +63,7 @@ for($i = 0; $i <= 7; $i++){
     }
 }
 
+print "URL collection done.\n";
 print "Gathering text.\n";
 
 #====================================
@@ -91,40 +106,115 @@ foreach $link (@pressLinks)
 #====================================================
  
 opendir (FOLDER, "./obama_press") || die "sorry, could not open obama_press files";
- 
+
 my @filelist = readdir (FOLDER);
- 
+
 foreach my $filename (@filelist){
- 
-	open (IN,"./obama_press/$filename") || die "Could not open $filename\n";
+	
+	$doccount++;
+	
+	#open the file
+	open (IN, "./obama_press/$filename") || die "sorry, could not open $filename\n";
   
+	#status display in terminal
 	print "Gathering terms from $filename\n";
   
+	#token indicating the presence of real content set to zero on document load
+	$foundContent = 0;
+  
+	#loop file line by line
 	while (my $line = <IN>){
-		my @splitline = split(/\b/, lc $line);
- 
-		foreach my $word (@splitline){
- 
-				my @splitword = split(//,$word);
- 
-				if (defined $splitword[0]){
- 
-					if ($splitword[0] =~ /\w/){
- 
-						$wordCollector{$word}++;
-						print OUTD "$word $wordCollector{$word}\n";
-					}
-					else {
-						next;
-					}
-				}
-			}
-		}	
-}
- 
+		
+		#if the real content has not been found
+		if ($foundContent == 0){
+		
+			#remove leading and trailing whitespace from line
+			$line =~ s/^\s*//;
+			$line =~ s/\s*$//;
+		
+			#split the line into words
+			my @splitline = split(/\W/, $line);
+		
+			#check the first word of the line
+			if ($splitline[0] eq "SUBJECT"){
+			
+				#if first word is SUBJECT
+					#update token
+					$foundContent = 1;
+					#grab the words from that line for the term freq hash
+					foreach my $word (@splitline){
+						
+						# stemmer requires a list isntead of a scalar
+						@single_word_list = $word;
+						
+						#perform stemming
+						$stemmed_word = $stemmer -> stem(@single_word_list);
+						
+						#get stemmed word back from anonymous array
+						$candidate = $stemmed_word->[0];
+						
+						#check for stop words
+							#if incoming word is found in the stop words array it is counted but not added to the term list
+							if(grep $_ eq $candidate, @stop_words){
+								$wordcount++;
+							}else{
+							#if incoming word is not found in the stop words array it is counted and added to the term list
+								$wordCollector{$candidate}++;
+								$wordcount++;
+							}#close of else
+						
+					}#closes foreach word loop
+					#go to the next line
+					next;
+			}else{
+				
+				#if the first word is not SUBJECT
+				#go to next line
+				next;
+			} #close else eq subject if statement
+			
+			
+			
+		} #end if foundContent == 0
+		
+		#if the real content has been found
+		if ($foundContent == 1){
+			
+			#remove leading and trailing whitespace from line
+			$line =~ s/^\s*//;
+			$line =~ s/\s*$//;
+		
+			#split the line into words
+			my @splitline = split(/\W/, $line);
+		
+			#add the lines words to the term freq hash
+			foreach my $word (@splitline){			
+						@single_word_list = $word;
+							
+						$stemmed_word = $stemmer -> stem(@single_word_list);
+						
+						print OUTD "$stemmed_word->[0]\n";
+						
+						$candidate = $stemmed_word->[0];
+						
+							if(grep $_ eq $candidate, @stop_words){
+								$wordcount++;
+							}else{
+								$wordCollector{$candidate}++;
+								$wordcount++;
+							}
+						
+			}#close foreach word loop
+		
+		}#close if found content if statement
+		
+	} #end while next line
+} #end foreach filename
+
+#create output document for term frequencies
 foreach $key (sort {$wordCollector{$b} <=> $wordCollector{$a}} keys %wordCollector){
 	print OUTF "$wordCollector{$key} $key\n";
 }
- 
-print "Done\n";
 
+#final status statement
+print " $doccount press documents contain $wordcount words\n";
