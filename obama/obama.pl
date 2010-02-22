@@ -92,10 +92,11 @@ foreach $link (@pressLinks)
     {
 	$stories = $res->content;
 	my $clean_text = $hs->parse($stories);
-	html_strip_whitespace(
-	    "source" =>\$clean_text,
-	    "out" =>\$less_whitespace);
-	print OUT "$less_whitespace";
+	#html_strip_whitespace(
+	 #   "source" =>\$clean_text,
+	  #  "out" =>\$less_whitespace);
+	#print $less_whitespace."\n";
+	print OUT $clean_text;
 	print "Created obama_whitehouse_".$count.".txt\n"; 
       }
   }
