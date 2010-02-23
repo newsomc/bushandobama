@@ -12,22 +12,31 @@ use HTML::Strip::Whitespace qw(html_strip_whitespace);
 use WWW::Mechanize;
 use Data::Dumper;
 use Lingua::Stem;
-#use Clair::Utils;
+use Lingua::StopWords qw( getStopWords );
+use Lingua::EN::Bigram;
+use File::Slurp;
+
 
 #
 # initialize output directories, documents and databases
 #
-mkdir("memoranda_files", 0777) || print $!;
-mkdir("debug", 0777) || print $!;
+mkdir("working_data", 0777) || print $!;
+mkdir("working_data/memoranda_files", 0777) || print $!;
+mkdir("working_data/debug", 0777) || print $!;
 
-dbmopen(%wordCollector,'gwb_countDB',0666);
+mkdir("output", 0777) || print $!;
 
-open(OUTD, ">debug/debug_report.txt")||die("could not open output debug file\n");
+dbmopen(%wordCollector,'working_data/gwb_countDB',0666);
 
-open(OUTS, ">full_doc_collection.txt")||die("could not open single collection file\n");
+open(OUTD, ">working_data/debug/debug.txt")||die("could not open output debug file\n");
 
-open(OUTF, ">term_freq_report.txt")||die("could not open output file\n");
-print OUTF "term\tcount\n";
+open(OUTS, ">working_data/full_doc_collection_bush.txt")||die("could not open single collection file\n");
+
+open(OUTF, ">output/term_freq_report_bush.txt")||die("could not open term frequency report file\n");
+
+open(OUTB, ">output/bigram_freq_report_bush.txt")||die("could not open bigram frequency file\n");
+
+open(OUTTS, ">output/bigram_tscore_report_bush.txt")||die("could not open bigram t-score report file\n");
 
 #
 # initialize the User Agent object
@@ -54,16 +63,14 @@ my $stemmer = Lingua::Stem->new(-locale => 'EN-UK');
 $stemmer->stem_caching({ -level => 2 });
 
 #
-#open the stopwords file and load the stop list into an array
+#initialize and get stop word array
 #
-@stop_words = ();
+my $stopwords = getStopWords('en');
 
-open(STOP, "<stop_words_stem.txt")||die("could not open stop words file\n");
-
-foreach $line (<STOP>) {
-    chomp($line);
-	push(@stop_words, $line);
-}
+#
+#initialize bigram maker
+#
+$bigram = Lingua::EN::Bigram->new;
 
 #
 #initialize counting variables
@@ -147,7 +154,7 @@ $memorandaPage = 0;
 #loop through url array and create a text file containing the parsed and stripped html document
 foreach $link (@memorandaLinks){ 
 	
-	open(OUT, ">memoranda_files/mempage_$memorandaPage.txt")||die("could not open output file for mem # $memorandaPage\n");
+	open(OUT, ">working_data/memoranda_files/mempage_$memorandaPage.txt")||die("could not open output file for mem # $memorandaPage\n");
 	
 	$urltoget = "http://georgewbush-whitehouse.archives.gov".$link;
 	
@@ -165,7 +172,7 @@ foreach $link (@memorandaLinks){
 		elsif ($res->is_error)
 		{
 			print STDERR __LINE__, " Error: ", $res->status_line, " ", $res;
-	}else{
+		}else{
 	    
 	$content = $res->content;
 	
@@ -183,11 +190,11 @@ foreach $link (@memorandaLinks){
 	
 #######################################
 #
-# pull usefull parts from text and create term list
+# pull usefull parts from text and single text
 #
 #######################################
 
-opendir (FOLDER, "./memoranda_files") || die "sorry, could not open /memoranda_files";
+opendir (FOLDER, "working_data/memoranda_files") || die "sorry, could not open /memoranda_files";
 		
 my @filelist = readdir (FOLDER);
 
@@ -196,10 +203,10 @@ foreach my $filename (@filelist){
 	$doccount++;
 	
 	#open the file
-	open (IN, "./memoranda_files/$filename") || die "sorry, could not open $filename\n";
+	open (IN, "working_data/memoranda_files/$filename") || die "sorry, could not open $filename\n";
   
 	#status display in terminal
-	print "Gathering terms from $filename\n";
+	print "locating relevant secion of $filename\n";
   
 	#token indicating the presence of real content set to zero on document load
 	$found_content_start = 0;
@@ -219,48 +226,28 @@ foreach my $filename (@filelist){
 			my @splitline = split(/\W/, $line);
 		
 			#check the first word of the line
+			#if first word is SUBJECT
 			if ($splitline[0] eq "SUBJECT"){
 			
-					print OUTS "\n";
-					
-				#if first word is SUBJECT
-					#update token
-					$found_content_start = 1;
-					#grab the words from that line for the term freq hash
-					foreach my $word (@splitline){
-						
-						print OUTS "$word ";
-						
-						# stemmer requires a list isntead of a scalar
-						@single_word_list = $word;
-						
-						#perform stemming
-						$stemmed_word = $stemmer -> stem(@single_word_list);
-						
-						#get stemmed word back from anonymous array
-						$candidate = $stemmed_word->[0];
-						
-						#check for stop words
-							#if incoming word is found in the stop words array it is counted but not added to the term list
-							if(grep $_ eq $candidate, @stop_words){
-								$wordcount++;
-							}else{
-							#if incoming word is not found in the stop words array it is counted and added to the term list
-								$wordCollector{$candidate}++;
-								$wordcount++;
-							}#close of else
-						
-					}#closes foreach word loop
-					#go to the next line
-					next;
-			}else{
+				#print a line, with stopwords removed to the single text output file
+				$clean_line = join ' ', grep { !$stopwords->{$_} } @splitline;
 				
+				print OUTS $clean_line;
+				
+				print OUTS "\n";
+
+				#update token to indicate start of memorandum
+				$found_content_start = 1;
+				
+				#go to the next line
+				next;
+			}else{
+	
 				#if the first word is not SUBJECT
 				#go to next line
 				next;
+				
 			} #close else eq subject if statement
-			
-			
 			
 		} #end if foundContent == 0
 		
@@ -282,36 +269,65 @@ foreach my $filename (@filelist){
 					next;
 			}
 		
-			#add the lines words to the term freq hash
-			foreach my $word (@splitline){			
-						print OUTS "$word ";
-						
-						@single_word_list = $word;
-							
-						$stemmed_word = $stemmer -> stem(@single_word_list);
-						
-						print OUTD "$stemmed_word->[0]\n";
-						
-						$candidate = $stemmed_word->[0];
-						
-							if(grep $_ eq $candidate, @stop_words){
-								$wordcount++;
-							}else{
-								$wordCollector{$candidate}++;
-								$wordcount++;
-							}
-						
-			}#close foreach word loop
+				$clean_line = join ' ', grep { !$stopwords->{$_} } @splitline;
+				
+				print OUTS $clean_line;
+				
+				print OUTS "\n";
+			
+			#go to the next line
+			next;
 		
 		}#close if found content if statement
 		
 	} #end while next line
 } #end foreach filename
 
-#create output document for term frequencies
-foreach $key (sort {$wordCollector{$b} <=> $wordCollector{$a}} keys %wordCollector){
-	print OUTF "$wordCollector{$key} $key\n";
+#######################################
+#
+# gather data
+#
+#######################################
+
+my $full_doc_file = read_file( 'working_data/full_doc_collection_bush.txt' ) ;
+
+$bigram->text($full_doc_file);
+
+# get bigram count
+print "Getting bigram count.\n";
+$bigram_count = $bigram->bigram_count;
+
+# list the bigrams according to frequency
+foreach ( sort { $$bigram_count{ $b } <=> $$bigram_count{ $a } } keys %$bigram_count ) {
+
+	print OUTB $$bigram_count{ $_ }, "\t$_\n";
+
+}
+
+
+# get word count
+print "Getting word count.\n";
+
+$word_count = $bigram->word_count;
+
+# list the words according to frequency print to text file
+foreach ( sort { $$word_count{ $b } <=> $$word_count{ $a } } keys %$word_count ) {
+
+	print OUTF $$word_count{ $_ }, "\t$_\n";
+
+}
+
+# get t-score
+print "Getting bigram t scores.\n";
+ 
+$tscore = $bigram->tscore;
+
+# list bigrams according to t-score
+foreach ( sort { $$tscore{ $b } <=> $$tscore{ $a } } keys %$tscore ) {
+
+	print OUTTS "$$tscore{ $_ }\t" . "$_\n";
+
 }
 
 #final status statement
-print "From $start_year to $stop_year $doccount memoranda contain $wordcount words\n";
+print "Done\n";
