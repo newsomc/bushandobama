@@ -76,6 +76,7 @@ $bigram = Lingua::EN::Bigram->new;
 #
 $wordcount = 0;
 $doccount = 0;
+$linecount = 0;
 
 
 #----------------------------------------------------------------------------
@@ -224,20 +225,29 @@ foreach my $filename (@filelist){
 			#split the line into words
 			my @splitline = split(/\W/, $line);
 		
+			$linecount++;
+		
 			#check the first word of the line
 			#if first word is SUBJECT
 			if ($splitline[0] eq "SUBJECT"){
 			
 				#print a line, with stopwords removed to the single text output file
-				$clean_line = join ' ', grep { !$stopwords->{$_} } @splitline;
+				@stopped_line = grep { !$stopwords->{$_} } @splitline;
 				
-				#re-do stemming
-				#my $stemmmed_words_anon_array = $stemmer->stem(@words);
+				#perform stemming
+				$stemmmed_words_array = $stemmer->stem(@stopped_line);
 				
-				print OUTS $clean_line;
+				@clean_array = @$stemmmed_words_array;
+
+				foreach $part (@clean_array){
+				
+					print OUTS "$part ";
+					$wordcount++;
+					
+				}
 				
 				print OUTS "\n";
-
+				
 				#update token to indicate start of memorandum
 				$found_content_start = 1;
 				
@@ -264,6 +274,7 @@ foreach my $filename (@filelist){
 		
 			#split the line into words
 			my @splitline = split(/\W/, $line);
+			$linecount++;
 			
 			if ($splitline[0] eq "GEORGE"){
 			
@@ -271,11 +282,20 @@ foreach my $filename (@filelist){
 					next;
 			}
 		
-				$clean_line = join ' ', grep { !$stopwords->{$_} } @splitline;
+			#print a line, with stopwords removed to the single text output file
+			@stopped_line = grep { !$stopwords->{$_} } @splitline;
 				
-				print OUTS $clean_line;
+			#perform stemming
+			$stemmmed_words_array = $stemmer->stem(@stopped_line);
 				
-				print OUTS "\n";
+			@clean_array = @$stemmmed_words_array;
+
+			foreach $part (@clean_array){
+				
+				print OUTS "$part ";
+				$wordcount++;
+					
+			}
 			
 			#go to the next line
 			next;
@@ -332,4 +352,4 @@ foreach ( sort { $$tscore{ $b } <=> $$tscore{ $a } } keys %$tscore ) {
 }
 
 #final status statement
-print "Done\n";
+print "$wordcount words in $linecount lines from $doccount documents.\n";
