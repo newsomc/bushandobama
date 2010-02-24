@@ -1,9 +1,8 @@
-######################################
+#----------------------------------------------------------------------------
 #
-# Preparation
+#		Preparation
 #
-#####################################
-
+#----------------------------------------------------------------------------
 use URI;
 use LWP::UserAgent;
 use HTTP::Cookies;
@@ -231,6 +230,9 @@ foreach my $filename (@filelist){
 			
 				#print a line, with stopwords removed to the single text output file
 				$clean_line = join ' ', grep { !$stopwords->{$_} } @splitline;
+				
+				#re-do stemming
+				#my $stemmmed_words_anon_array = $stemmer->stem(@words);
 				
 				print OUTS $clean_line;
 				
